@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+
+import argparse
+import uuid
+from pathlib import Path
+from dataclasses import dataclass
+
+
+@dataclass
+class Stats:
+	lines_found: int = 0
+	lines_updated: int = 0
+	uuids_added: int = 0
+	uuids_found: int = 0
+
+	def add(self, other: 'Stats'):
+		self.lines_updated += other.lines_updated
+		self.lines_found += other.lines_found
+		self.uuids_added += other.uuids_added
+		self.uuids_found += other.uuids_found
+
+	def __str__(self):
+		return f"({self.lines_updated}/{self.lines_found} lines updated, {self.uuids_added}/{self.uuids_found} UUIDs added/found)"
+
+
+def string_is_valid_uuid(val: str):
+	try:
+		return str(uuid.UUID(val)) == val
+	except ValueError:
+		return False
+
+
+def process_line(line: str, stats: Stats) -> str:
+	stats.lines_found += 1
+	original = line
+
+	line = line.rstrip()  # remove trailing whitespace
+	line = line.lstrip(' \t').rjust(len(line) - len(line.lstrip(' ')))  # remove non-tab leading whitespace only
+
+	if line.startswith("[") and line.endswith("]"):
+		content = line[1:-1]
+		if string_is_valid_uuid(content):
+			stats.uuids_found += 1
+		else:
+			line = f'[{uuid.uuid4()}]'
+			stats.uuids_added += 1
+
+	if line != original:
+		stats.lines_updated += 1
+
+	return line
+
+
+def process_file(path: Path, args) -> Stats:
+	stats = Stats()
+
+	with path.open('r', encoding='utf-8') as f:
+		lines = f.read().splitlines()
+
+	processed_lines = [process_line(line, stats) for line in lines]
+	processed_text = "\n".join(processed_lines)
+
+	action = "Skipped"
+	if args.write:
+		if stats.lines_updated:
+			with path.open('w', encoding='utf-8') as f:
+				f.write(processed_text)
+			action = "Updated"
+		else:
+			action = "Up-to-date"
+	elif args.print:
+		print(f"---- {path} ----")
+		print(processed_text)
+		action = "Printed"
+
+	print(f"{action}: {path} {stats}")
+	return stats
+
+
+def main():
+	parser = argparse.ArgumentParser(description="Clean up files and inject UUIDs into [] lines.")
+	parser.add_argument('files', nargs='+', help="List of files to process")
+	parser.add_argument('--print', action='store_true', help="Print output to console")
+	parser.add_argument('--write', action='store_true', help="Write changes to files")
+
+	args = parser.parse_args()
+	total_stats = Stats()
+
+	for file_path in args.files:
+		path = Path(file_path)
+		if not path.exists():
+			print(f"File not found: {file_path}")
+			continue
+		stats = process_file(path, args)
+		total_stats.add(stats)
+
+
+if __name__ == '__main__':
+	main()
